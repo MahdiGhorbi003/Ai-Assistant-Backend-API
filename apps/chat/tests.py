@@ -1,10 +1,11 @@
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
+from django.test import TestCase
 
 from apps.accounts.models import CustomUser
 
-from .models import Conversation
+from .models import Conversation, Message
 
 
 class ConversationAPITests(APITestCase):
@@ -207,4 +208,45 @@ class ConversationAPITests(APITestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_401_UNAUTHORIZED,
+        )
+
+
+class MessageModelTests(TestCase):
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(
+            email='user_test@gmail.com',
+            password='StrongPass123!',
+        )
+
+        self.conversation = Conversation.objects.create(
+            user=self.user,
+            title='Test Conversation',
+        )
+
+    def test_create_message(self):
+        message = Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='hi',
+        )
+
+        self.assertEqual(
+            message.conversation,
+            self.conversation,
+        )
+
+        self.assertEqual(
+            message.role,
+            'user',
+        )
+
+        self.assertEqual(
+            message.content,
+            'hi',
+        )
+
+        self.assertEqual(
+            Message.objects.count(),
+            1,
         )
