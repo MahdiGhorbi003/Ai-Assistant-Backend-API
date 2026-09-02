@@ -1,8 +1,9 @@
 from rest_framework import viewsets
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import PermissionDenied
 
-from .models import Conversation
-from .serializers import ConversationSerializer
+from .models import Conversation, Message
+from .serializers import ConversationSerializer, MessageSerializer
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
@@ -17,4 +18,14 @@ class ConversationViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(
             user=self.request.user
+        )
+
+
+class MessageViewSet(viewsets.ModelViewSet):
+    serializer_class = MessageSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def get_queryset(self):
+        return Message.objects.filter(
+            conversation__user=self.request.user
         )
