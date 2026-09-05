@@ -1,11 +1,15 @@
+from unittest.mock import patch
+
+from django.test import TestCase
 from django.urls import reverse
+
 from rest_framework import status
 from rest_framework.test import APITestCase
-from django.test import TestCase
 
 from apps.accounts.models import CustomUser
 
 from .models import Conversation, Message
+from .services.llm_service import LLMService
 
 
 class ConversationAPITests(APITestCase):
@@ -16,7 +20,9 @@ class ConversationAPITests(APITestCase):
             password='StrongPass123!',
         )
 
-        self.client.force_authenticate(user=self.user)
+        self.client.force_authenticate(
+            user=self.user,
+        )
 
         self.list_url = reverse(
             'chat:conversation-list'
@@ -199,7 +205,9 @@ class ConversationAPITests(APITestCase):
         )
 
     def test_unauthenticated_user_cannot_access_conversations(self):
-        self.client.force_authenticate(user=None)
+        self.client.force_authenticate(
+            user=None
+        )
 
         response = self.client.get(
             self.list_url
@@ -273,10 +281,17 @@ class MessageAPITests(APITestCase):
             'chat:message-list'
         )
 
-    def test_create_message(self):
+    @patch(
+        'apps.chat.services.llm_service.LLMClient.send_message'
+    )
+    def test_create_message(
+        self,
+        mock_send_message,
+    ):
+        mock_send_message.return_value = 'Hello from AI'
+
         data = {
             'conversation': self.conversation.id,
-            'role': 'user',
             'content': 'hello django',
         }
 
@@ -288,30 +303,48 @@ class MessageAPITests(APITestCase):
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_201_CREATED,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            response.data['response'],
+            'Hello from AI',
         )
 
         self.assertEqual(
             Message.objects.count(),
-            1,
+            2,
         )
 
-        message = Message.objects.get()
+        user_message = Message.objects.get(
+            role='user'
+        )
+
+        assistant_message = Message.objects.get(
+            role='assistant'
+        )
 
         self.assertEqual(
-            message.conversation,
+            user_message.content,
+            'hello django',
+        )
+
+        self.assertEqual(
+            assistant_message.content,
+            'Hello from AI',
+        )
+
+        self.assertEqual(
+            user_message.conversation,
             self.conversation,
         )
 
         self.assertEqual(
-            message.role,
-            data['role'],
+            assistant_message.conversation,
+            self.conversation,
         )
 
-        self.assertEqual(
-            message.content,
-            data['content'],
-        )
+        mock_send_message.assert_called_once()
 
     def test_list_only_own_messages(self):
         Message.objects.create(
@@ -447,6 +480,11 @@ class MessageAPITests(APITestCase):
             data['content'],
         )
 
+        self.assertEqual(
+            message.role,
+            'user',
+        )
+
     def test_delete_own_message(self):
         message = Message.objects.create(
             conversation=self.conversation,
@@ -484,4 +522,152 @@ class MessageAPITests(APITestCase):
         self.assertEqual(
             response.status_code,
             status.HTTP_401_UNAUTHORIZED,
+        )
+
+
+class LLMServiceTests(TestCase):
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(
+            email='llm_test@gmail.com',
+            password='StrongPass123!',
+        )
+
+        self.conversation = Conversation.objects.create(
+            user=self.user,
+            title='LLM Test Conversation',
+        )
+
+    def test_build_history(self):
+        Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='Hello',
+        )
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='assistant',
+            content='Hi!',
+        )
+
+        service = LLMService()
+
+        history = service.build_history(
+            self.conversation
+        )
+
+        self.assertEqual(
+            history,
+            [
+                {
+                    'role': 'user',
+                    'content': 'Hello',
+                },
+                {
+                    'role': 'assistant',
+                    'content': 'Hi!',
+                },
+            ],
+        )
+
+    @patch(
+        'apps.chat.services.llm_service.LLMClient.send_message'
+    )
+    def test_send_message_creates_user_and_assistant_messages(
+        self,
+        mock_send_message,
+    ):
+        mock_send_message.return_value = 'this is response'
+
+        service = LLMService()
+
+        response = service.send_message(
+            self.conversation,
+            'Hello AI',
+        )
+
+        self.assertEqual(
+            response,
+            'this is response',
+        )
+
+        self.assertEqual(
+            Message.objects.count(),
+            2,
+        )
+
+        user_message = Message.objects.get(
+            role='user'
+        )
+
+        assistant_message = Message.objects.get(
+            role='assistant'
+        )
+
+        self.assertEqual(
+            user_message.content,
+            'Hello AI',
+        )
+
+        self.assertEqual(
+            assistant_message.content,
+            'this is response',
+        )
+
+        self.assertEqual(
+            user_message.conversation,
+            self.conversation,
+        )
+
+        self.assertEqual(
+            assistant_message.conversation,
+            self.conversation,
+        )
+
+        mock_send_message.assert_called_once()
+
+    @patch(
+        'apps.chat.services.llm_service.LLMClient.send_message'
+    )
+    def test_send_message_passes_history_to_llm(
+        self,
+        mock_send_message,
+    ):
+        mock_send_message.return_value = 'new response'
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='Old question',
+        )
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='assistant',
+            content='Old answer',
+        )
+
+        service = LLMService()
+
+        service.send_message(
+            self.conversation,
+            'New question',
+        )
+
+        mock_send_message.assert_called_once_with(
+            messages=[
+                {
+                    'role': 'user',
+                    'content': 'Old question',
+                },
+                {
+                    'role': 'assistant',
+                    'content': 'Old answer',
+                },
+                {
+                    'role': 'user',
+                    'content': 'New question',
+                },
+            ]
         )

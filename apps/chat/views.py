@@ -1,9 +1,12 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.generics import get_object_or_404
+from rest_framework.response import Response
 
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer
+from .services.llm_service import LLMService
+from .services.llm.exceptions import LLMException
 
 
 class ConversationViewSet(viewsets.ModelViewSet):
@@ -28,4 +31,36 @@ class MessageViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Message.objects.filter(
             conversation__user=self.request.user
+        )
+
+    def create(self, request, *args, **kwargs):
+        conversation_id = request.data.get('conversation')
+        content = request.data.get('content')
+
+        conversation = get_object_or_404(
+            Conversation,
+            id=conversation_id,
+            user=self.request.user,
+        )
+
+        service = LLMService()
+
+        try:
+            response = service.send_message(
+                conversation=conversation,
+                content=content,
+            )
+
+        except LLMException as exception:
+            return Response(
+                {
+                    'detail': str(exception),
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(
+            {
+                'response': response,
+            },
+            status=status.HTTP_200_OK,
         )
