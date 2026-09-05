@@ -173,3 +173,22 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'Backend API for an AI Assistant ',
     'VERSION': '1.0.0',
 }
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+
+    'loggers': {
+        'apps.chat': {
+            'handlers': ['console'],
+                'level': 'INFO',
+                'propagate': False,
+        },
+    },
+}

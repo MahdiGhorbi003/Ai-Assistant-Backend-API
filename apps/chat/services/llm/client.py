@@ -1,4 +1,5 @@
 import os
+import logging
 
 from groq import (
     Groq,
@@ -9,6 +10,8 @@ from groq import (
 )
 
 from apps.chat.services.llm.exceptions import LLMException
+
+logger = logging.getLogger(__name__)
 
 
 class LLMClient:
@@ -21,6 +24,8 @@ class LLMClient:
     def send_message(self, messages):
 
         try:
+            logger.info('sending request to LLM')
+
             response = self.client.chat.completions.create(
                 model='openai/gpt-oss-120b',
                 messages=messages,
@@ -29,6 +34,7 @@ class LLMClient:
             return response.choices[0].message.content
 
         except APITimeoutError:
+            logger.error('LLM request timed out')
             raise LLMException(
                 'LLM request timed out.'
             )
