@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 from pathlib import Path
 import os
 from datetime import timedelta
+
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -41,6 +42,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+
+    'drf_spectacular',
 
     'apps.accounts',
     'apps.chat',
@@ -151,6 +154,9 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'user': '10/min',
     },
+
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+
 }
 
 SIMPLE_JWT = {
@@ -159,4 +165,11 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': False,
     'BLACKLIST_AFTER_ROTATION': False,
     'AUTH_HEADER_TYPES': ('Bearer',),
+}
+
+
+SPECTACULAR_SETTINGS = {
+    'TITLE':'AI Assistant API',
+    'DESCRIPTION': 'Backend API for an AI Assistant ',
+    'VERSION': '1.0.0',
 }
