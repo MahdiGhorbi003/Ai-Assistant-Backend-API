@@ -1,13 +1,6 @@
 import os
 import logging
-
-from groq import (
-    Groq,
-    APITimeoutError,
-    APIConnectionError,
-    RateLimitError,
-    APIStatusError,
-)
+import openai
 
 from apps.chat.services.llm.exceptions import LLMException
 
@@ -17,8 +10,9 @@ logger = logging.getLogger(__name__)
 class LLMClient:
 
     def __init__(self):
-        self.client = Groq(
-            api_key=os.getenv('GROQ_API_KEY'),
+        self.client = openai.OpenAI(
+            api_key=os.getenv('OPENROUTER_API_KEY'),
+            base_url='https://openrouter.ai/api/v1',
         )
 
     def send_message(self, messages):
@@ -27,29 +21,31 @@ class LLMClient:
             logger.info('sending request to LLM')
 
             response = self.client.chat.completions.create(
-                model='openai/gpt-oss-120b',
+                model='nvidia/nemotron-3-ultra-550b-a55b:free',
                 messages=messages,
             )
 
             return response.choices[0].message.content
 
-        except APITimeoutError:
+        except openai.APITimeoutError:
             logger.error('LLM request timed out')
             raise LLMException(
                 'LLM request timed out.'
             )
 
-        except APIConnectionError:
+        except openai.APIConnectionError:
+            logger.error('Failed to connect to LLM')
             raise LLMException(
                 'Failed to connect to LLM.'
             )
 
-        except RateLimitError:
+        except openai.RateLimitError:
+            logger.error('LLM rate limit exceeded')
             raise LLMException(
                 'LLM rate limit exceeded.'
             )
 
-        except APIStatusError as exception:
+        except openai.APIStatusError as exception:
 
             if exception.status_code == 401:
                 raise LLMException(

@@ -2,7 +2,6 @@ from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
-from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer
@@ -10,15 +9,6 @@ from .services.llm_service import LLMService
 from .services.llm.exceptions import LLMException
 
 
-@extend_schema(
-    parameters=[
-        OpenApiParameter(
-            name='id',
-            type=int,
-            location=OpenApiParameter.PATH,
-        ),
-    ]
-)
 class ConversationViewSet(viewsets.ModelViewSet):
     serializer_class = ConversationSerializer
     permission_classes = (IsAuthenticated,)
@@ -34,15 +24,6 @@ class ConversationViewSet(viewsets.ModelViewSet):
         )
 
 
-@extend_schema(
-    parameters=[
-        OpenApiParameter(
-            name='id',
-            type=int,
-            location=OpenApiParameter.PATH,
-        ),
-    ]
-)
 class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
     permission_classes = (IsAuthenticated,)
