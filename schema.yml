@@ -591,7 +591,6 @@ components:
         email:
           type: string
           format: email
-          maxLength: 254
         password:
           type: string
           writeOnly: true
