@@ -20,7 +20,15 @@ class ConversationSerializer(serializers.ModelSerializer):
         ]
 
     def validate_title(self, value):
-        return value.strip()
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                'Title cannot be empty.'
+            )
+
+        return value
+
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -41,4 +49,12 @@ class MessageSerializer(serializers.ModelSerializer):
         ]
 
     def validate_content(self, value):
-        return value.strip()
+        value = value.strip()
+
+        if not value:
+            raise serializers.ValidationError(
+                'Message content cannot be empty.'
+            )
+
+        return value
+

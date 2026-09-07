@@ -34,14 +34,17 @@ class MessageViewSet(viewsets.ModelViewSet):
         )
 
     def create(self, request, *args, **kwargs):
-        conversation_id = request.data.get('conversation')
-        content = request.data.get('content')
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
         conversation = get_object_or_404(
             Conversation,
-            id=conversation_id,
-            user=self.request.user,
+            id=serializer.validated_data['conversation'].id,
+            user=request.user,
         )
+
+        content = serializer.validated_data['content']
 
         service = LLMService()
 
