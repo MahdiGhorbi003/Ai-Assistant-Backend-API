@@ -15,6 +15,14 @@ class Conversation(models.Model):
         blank=True,
     )
 
+    summary = models.TextField(
+        blank=True,
+    )
+
+    summary_message_count = models.PositiveIntegerField(
+        default=0,
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -28,7 +36,6 @@ class Conversation(models.Model):
 
 
 class Message(models.Model):
-
     ROLE_CHOICES = [
         ('user', 'User'),
         ('assistant', 'Assistant'),

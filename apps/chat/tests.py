@@ -7,9 +7,11 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import CustomUser
-
 from .models import Conversation, Message
 from .services.llm_service import LLMService
+from .services.context.recent_messages import RecentMessagesService
+from .services.context.manager import ContextManager
+from .services.context.summary import SummaryService
 
 
 class ConversationAPITests(APITestCase):
@@ -285,8 +287,8 @@ class MessageAPITests(APITestCase):
         'apps.chat.services.llm_service.LLMClient.send_message'
     )
     def test_create_message(
-        self,
-        mock_send_message,
+            self,
+            mock_send_message,
     ):
         mock_send_message.return_value = 'Hello from AI'
 
@@ -538,45 +540,12 @@ class LLMServiceTests(TestCase):
             title='LLM Test Conversation',
         )
 
-    def test_build_history(self):
-        Message.objects.create(
-            conversation=self.conversation,
-            role='user',
-            content='Hello',
-        )
-
-        Message.objects.create(
-            conversation=self.conversation,
-            role='assistant',
-            content='Hi!',
-        )
-
-        service = LLMService()
-
-        history = service.build_history(
-            self.conversation
-        )
-
-        self.assertEqual(
-            history,
-            [
-                {
-                    'role': 'user',
-                    'content': 'Hello',
-                },
-                {
-                    'role': 'assistant',
-                    'content': 'Hi!',
-                },
-            ],
-        )
-
     @patch(
         'apps.chat.services.llm_service.LLMClient.send_message'
     )
     def test_send_message_creates_user_and_assistant_messages(
-        self,
-        mock_send_message,
+            self,
+            mock_send_message,
     ):
         mock_send_message.return_value = 'this is response'
 
@@ -630,9 +599,9 @@ class LLMServiceTests(TestCase):
     @patch(
         'apps.chat.services.llm_service.LLMClient.send_message'
     )
-    def test_send_message_passes_history_to_llm(
-        self,
-        mock_send_message,
+    def test_send_message_passes_context_to_llm(
+            self,
+            mock_send_message,
     ):
         mock_send_message.return_value = 'new response'
 
@@ -658,6 +627,13 @@ class LLMServiceTests(TestCase):
         mock_send_message.assert_called_once_with(
             messages=[
                 {
+                    'role': 'system',
+                    'content': (
+                        'You are a helpful AI assistant. '
+                        'Answer clearly and accurately.'
+                    ),
+                },
+                {
                     'role': 'user',
                     'content': 'Old question',
                 },
@@ -670,4 +646,454 @@ class LLMServiceTests(TestCase):
                     'content': 'New question',
                 },
             ]
+        )
+
+    @patch(
+        'apps.chat.services.llm_service.SummaryService.generate_summary'
+    )
+    @patch(
+        'apps.chat.services.llm_service.LLMClient.send_message'
+    )
+    def test_send_message_updates_summary_after_threshold(
+            self,
+            mock_send_message,
+            mock_generate_summary,
+    ):
+        mock_send_message.return_value = 'new response'
+
+        for index in range(19):
+            Message.objects.create(
+                conversation=self.conversation,
+                role='user',
+                content=f'Message {index}',
+            )
+
+        service = LLMService()
+
+        service.send_message(
+            self.conversation,
+            'Message 19',
+        )
+
+        mock_generate_summary.assert_called_once_with(
+            self.conversation
+        )
+
+
+class RecentMessagesServiceTests(TestCase):
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(
+            email='recent_messages_test@gmail.com',
+            password='StrongPass123!',
+        )
+
+        self.conversation = Conversation.objects.create(
+            user=self.user,
+            title='Recent Messages Test',
+        )
+
+    def test_get_recent_messages(self):
+        Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='Hello',
+        )
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='assistant',
+            content='Hi!',
+        )
+
+        service = RecentMessagesService()
+
+        result = service.get_recent_messages(
+            self.conversation
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    'role': 'user',
+                    'content': 'Hello',
+                },
+                {
+                    'role': 'assistant',
+                    'content': 'Hi!',
+                },
+            ],
+        )
+
+    def test_get_recent_messages_only_from_conversation(self):
+        Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='My message',
+        )
+
+        other_user = CustomUser.objects.create_user(
+            email='other_recent_messages@gmail.com',
+            password='StrongPass123!',
+        )
+
+        other_conversation = Conversation.objects.create(
+            user=other_user,
+            title='Other Conversation',
+        )
+
+        Message.objects.create(
+            conversation=other_conversation,
+            role='user',
+            content='Other message',
+        )
+
+        service = RecentMessagesService()
+
+        result = service.get_recent_messages(
+            self.conversation
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    'role': 'user',
+                    'content': 'My message',
+                },
+            ],
+        )
+
+    def test_get_recent_messages_respects_limit(self):
+        for index in range(12):
+            Message.objects.create(
+                conversation=self.conversation,
+                role='user',
+                content=f'Message {index}',
+            )
+
+        service = RecentMessagesService(limit=10)
+
+        result = service.get_recent_messages(
+            self.conversation
+        )
+
+        self.assertEqual(
+            len(result),
+            10,
+        )
+
+        self.assertEqual(
+            result[0]['content'],
+            'Message 2',
+        )
+
+        self.assertEqual(
+            result[-1]['content'],
+            'Message 11',
+        )
+
+
+class ContextManagerTests(TestCase):
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(
+            email='context_manager_test@gmail.com',
+            password='StrongPass123!',
+        )
+
+        self.conversation = Conversation.objects.create(
+            user=self.user,
+            title='Context Manager Test',
+        )
+
+    def test_build_context(self):
+        Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='Hello',
+        )
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='assistant',
+            content='Hi!',
+        )
+
+        manager = ContextManager()
+
+        context = manager.build_context(
+            self.conversation
+        )
+
+        self.assertEqual(
+            context,
+            [
+                {
+                    'role': 'system',
+                    'content': (
+                        'You are a helpful AI assistant. '
+                        'Answer clearly and accurately.'
+                    ),
+                },
+                {
+                    'role': 'user',
+                    'content': 'Hello',
+                },
+                {
+                    'role': 'assistant',
+                    'content': 'Hi!',
+                },
+            ],
+        )
+
+    def test_build_context_with_summary(self):
+        self.conversation.summary = 'User likes Python.'
+        self.conversation.save()
+
+        manager = ContextManager()
+
+        context = manager.build_context(
+            self.conversation
+        )
+
+        self.assertEqual(
+            context,
+            [
+                {
+                    'role': 'system',
+                    'content': (
+                        'You are a helpful AI assistant. '
+                        'Answer clearly and accurately.'
+                    ),
+                },
+                {
+                    'role': 'system',
+                    'content': (
+                        'conversation summary:'
+                        'User likes Python.'
+                    ),
+                },
+            ],
+        )
+
+
+class SummaryServiceTests(TestCase):
+
+    def setUp(self):
+        self.user = CustomUser.objects.create_user(
+            email='summary_test@gmail.com',
+            password='StrongPass123!',
+        )
+
+        self.conversation = Conversation.objects.create(
+            user=self.user,
+            title='Summary Test',
+        )
+
+    def test_get_messages_for_summary(self):
+        Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='Hello',
+        )
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='assistant',
+            content='Hi!',
+        )
+
+        service = SummaryService()
+
+        result = service.get_messages_for_summary(
+            self.conversation
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    'role': 'user',
+                    'content': 'Hello',
+                },
+                {
+                    'role': 'assistant',
+                    'content': 'Hi!',
+                },
+            ],
+        )
+
+    def test_get_messages_for_summary_skips_summarized_messages(self):
+        for index in range(5):
+            Message.objects.create(
+                conversation=self.conversation,
+                role='user',
+                content=f'Message {index}',
+            )
+
+        self.conversation.summary_message_count = 3
+        self.conversation.save()
+
+        service = SummaryService()
+
+        result = service.get_messages_for_summary(
+            self.conversation
+        )
+
+        self.assertEqual(
+            result,
+            [
+                {
+                    'role': 'user',
+                    'content': 'Message 3',
+                },
+                {
+                    'role': 'user',
+                    'content': 'Message 4',
+                },
+            ],
+        )
+
+    def test_should_update_summary(self):
+        for index in range(20):
+            Message.objects.create(
+                conversation=self.conversation,
+                role='user',
+                content=f'Message {index}',
+            )
+
+        service = SummaryService()
+
+        self.assertTrue(
+            service.should_update_summary(
+                self.conversation
+            )
+        )
+
+    def test_should_not_update_summary(self):
+        for index in range(19):
+            Message.objects.create(
+                conversation=self.conversation,
+                role='user',
+                content=f'Message {index}',
+            )
+
+        service = SummaryService()
+
+        self.assertFalse(
+            service.should_update_summary(
+                self.conversation
+            )
+        )
+
+    @patch(
+        'apps.chat.services.context.summary.LLMClient.send_message'
+    )
+    def test_generate_summary(self, mock_send_message):
+        mock_send_message.return_value = (
+            'User is learning backend development.'
+        )
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='I am learning Django.',
+        )
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='assistant',
+            content='Django is a Python framework.',
+        )
+
+        service = SummaryService()
+
+        result = service.generate_summary(
+            self.conversation
+        )
+
+        self.conversation.refresh_from_db()
+
+        self.assertEqual(
+            result,
+            'User is learning backend development.',
+        )
+
+        self.assertEqual(
+            self.conversation.summary,
+            'User is learning backend development.',
+        )
+
+        self.assertEqual(
+            self.conversation.summary_message_count,
+            2,
+        )
+
+        mock_send_message.assert_called_once()
+
+    @patch(
+        'apps.chat.services.context.summary.LLMClient.send_message'
+    )
+    def test_generate_summary_with_previous_summary(
+            self,
+            mock_send_message,
+    ):
+        mock_send_message.return_value = (
+            'Updated conversation summary.'
+        )
+
+        self.conversation.summary = 'User is learning Python.'
+        self.conversation.summary_message_count = 0
+        self.conversation.save()
+
+        Message.objects.create(
+            conversation=self.conversation,
+            role='user',
+            content='I am now learning Django.',
+        )
+
+        service = SummaryService()
+
+        result = service.generate_summary(
+            self.conversation
+        )
+
+        self.conversation.refresh_from_db()
+
+        self.assertEqual(
+            result,
+            'Updated conversation summary.',
+        )
+
+        self.assertEqual(
+            self.conversation.summary,
+            'Updated conversation summary.',
+        )
+
+        self.assertEqual(
+            self.conversation.summary_message_count,
+            1,
+        )
+
+        mock_send_message.assert_called_once()
+
+        call_args = mock_send_message.call_args
+
+        messages = call_args.kwargs['messages']
+
+        self.assertEqual(
+            messages[0]['role'],
+            'system',
+        )
+
+        self.assertEqual(
+            messages[1]['role'],
+            'system',
+        )
+
+        self.assertIn(
+            'User is learning Python.',
+            messages[1]['content'],
         )
