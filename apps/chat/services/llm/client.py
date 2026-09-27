@@ -15,13 +15,15 @@ class LLMClient:
             base_url='https://openrouter.ai/api/v1',
         )
 
+        self.model = 'nvidia/nemotron-3-ultra-550b-a55b:free'
+
     def send_message(self, messages):
 
         try:
             logger.info('sending request to LLM')
 
             response = self.client.chat.completions.create(
-                model='nvidia/nemotron-3-ultra-550b-a55b:free',
+                model=self.model,
                 messages=messages,
             )
 
@@ -66,3 +68,16 @@ class LLMClient:
                 raise LLMException(
                     'LLM API returned an error.'
                 )
+
+    def stream_messages(self, messages):
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            stream=True,
+        )
+
+        for chunk in response:
+            content = chunk.choices[0].delta.content
+
+            if content:
+                yield content

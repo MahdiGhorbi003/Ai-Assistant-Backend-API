@@ -37,3 +37,29 @@ class LLMService:
             self.summary_service.generate_summary(conversation)
 
         return response
+
+    def stream_message(self, conversation, content):
+        with transaction.atomic():
+            Message.objects.create(
+                conversation=conversation,
+                role='user',
+                content=content,
+            )
+
+            context = self.context_manager.build_context(
+                conversation
+            )
+
+            full_response = ''
+
+            for chunk in self.client.stream_messages(
+                    messages=context,
+            ):
+                full_response += chunk
+                yield chunk
+
+            Message.objects.create(
+                conversation=conversation,
+                role='assistant',
+                content=full_response,
+            )

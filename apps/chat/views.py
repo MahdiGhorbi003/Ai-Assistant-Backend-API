@@ -1,7 +1,10 @@
+from django.http import StreamingHttpResponse
+
 from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
+from rest_framework.decorators import action
 
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer
@@ -67,4 +70,35 @@ class MessageViewSet(viewsets.ModelViewSet):
                 'response': response,
             },
             status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=['post'], url_path='stream')
+    def stream(self, request, *args, **kwargs):
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        conversation = get_object_or_404(
+            Conversation,
+            id=serializer.validated_data['conversation'].id,
+            user=request.user,
+        )
+
+        content = serializer.validated_data['content']
+        service = LLMService()
+
+        def generate():
+            try:
+                for chunk in service.stream_message(
+                        conversation=conversation,
+                        content=content,
+                ):
+                    yield chunk
+
+            except LLMException as exception:
+                yield f'Error: {str(exception)}'
+
+        return StreamingHttpResponse(
+            generate(),
+            content_type='text/plain',
         )

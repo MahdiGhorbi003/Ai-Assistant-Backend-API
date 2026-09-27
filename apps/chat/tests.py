@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from django.test import TestCase
 from django.urls import reverse
@@ -8,10 +8,12 @@ from rest_framework.test import APITestCase
 
 from apps.accounts.models import CustomUser
 from .models import Conversation, Message
+from .services.llm.exceptions import LLMException
 from .services.llm_service import LLMService
 from .services.context.recent_messages import RecentMessagesService
 from .services.context.manager import ContextManager
 from .services.context.summary import SummaryService
+from apps.chat.services.llm.client import LLMClient
 
 
 class ConversationAPITests(APITestCase):
@@ -348,6 +350,93 @@ class MessageAPITests(APITestCase):
 
         mock_send_message.assert_called_once()
 
+    @patch(
+        'apps.chat.services.llm_service.LLMService.stream_message'
+    )
+    def test_stream_message(
+            self,
+            mock_stream_message,
+    ):
+        mock_stream_message.return_value = iter([
+            'Hello',
+            ' world',
+        ])
+
+        data = {
+            'conversation': self.conversation.id,
+            'content': 'hello django',
+        }
+
+        stream_url = reverse(
+            'chat:message-stream'
+        )
+
+        response = self.client.post(
+            stream_url,
+            data=data,
+            format='json',
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        content = b''.join(
+            response.streaming_content
+        ).decode()
+
+        self.assertEqual(
+            content,
+            'Hello world',
+        )
+
+        mock_stream_message.assert_called_once()
+
+    @patch(
+        'apps.chat.services.llm_service.LLMService.stream_message'
+    )
+    def test_stream_message_error(
+            self,
+            mock_stream_message,
+    ):
+        def stream_error(*args, **kwargs):
+            yield 'Hello'
+            raise LLMException('LLM server error.')
+
+        mock_stream_message.return_value = stream_error()
+
+        data = {
+            'conversation': self.conversation.id,
+            'content': 'hello django',
+        }
+
+        stream_url = reverse(
+            'chat:message-stream'
+        )
+
+        response = self.client.post(
+            stream_url,
+            data=data,
+            format='json',
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        content = b''.join(
+            response.streaming_content
+        ).decode()
+
+        self.assertEqual(
+            content,
+            'HelloError: LLM server error.',
+        )
+
+        mock_stream_message.assert_called_once()
+
     def test_list_only_own_messages(self):
         Message.objects.create(
             conversation=self.conversation,
@@ -678,6 +767,56 @@ class LLMServiceTests(TestCase):
         mock_generate_summary.assert_called_once_with(
             self.conversation
         )
+
+    @patch('apps.chat.services.llm_service.LLMClient.stream_messages')
+    def test_stream_message(
+            self,
+            mock_stream_messages,
+    ):
+        mock_stream_messages.return_value = iter([
+            'Hello',
+            ' world',
+        ])
+
+        service = LLMService()
+
+        result = list(
+            service.stream_message(
+                self.conversation,
+                'Hello',
+            )
+        )
+
+        self.assertEqual(
+            result,
+            ['Hello', ' world'],
+        )
+
+        messages = Message.objects.filter(
+            conversation=self.conversation,
+        ).order_by('created_at')
+
+        self.assertEqual(messages.count(), 2)
+
+        self.assertEqual(
+            messages[0].role,
+            'user',
+        )
+        self.assertEqual(
+            messages[0].content,
+            'Hello',
+        )
+
+        self.assertEqual(
+            messages[1].role,
+            'assistant',
+        )
+        self.assertEqual(
+            messages[1].content,
+            'Hello world',
+        )
+
+        mock_stream_messages.assert_called_once()
 
 
 class RecentMessagesServiceTests(TestCase):
@@ -1096,4 +1235,59 @@ class SummaryServiceTests(TestCase):
         self.assertIn(
             'User is learning Python.',
             messages[1]['content'],
+        )
+
+
+class LLMClientTests(TestCase):
+
+    @patch('apps.chat.services.llm.client.openai.OpenAI')
+    def test_stream_messages(self, mock_openai):
+        mock_response = [
+            MagicMock(
+                choices=[
+                    MagicMock(
+                        delta=MagicMock(content='Hello')
+                    )
+                ]
+            ),
+            MagicMock(
+                choices=[
+                    MagicMock(
+                        delta=MagicMock(content=' world')
+                    )
+                ]
+            ),
+        ]
+
+        mock_openai.return_value.chat.completions.create.return_value = (
+            mock_response
+        )
+
+        client = LLMClient()
+
+        result = list(
+            client.stream_messages(
+                messages=[
+                    {
+                        'role': 'user',
+                        'content': 'Hello',
+                    }
+                ]
+            )
+        )
+
+        self.assertEqual(
+            result,
+            ['Hello', ' world'],
+        )
+
+        mock_openai.return_value.chat.completions.create.assert_called_once_with(
+            model=client.model,
+            messages=[
+                {
+                    'role': 'user',
+                    'content': 'Hello',
+                }
+            ],
+            stream=True,
         )
