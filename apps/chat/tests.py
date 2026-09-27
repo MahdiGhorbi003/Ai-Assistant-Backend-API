@@ -1,4 +1,5 @@
 from unittest.mock import patch, MagicMock
+from pydantic import ValidationError
 
 from django.test import TestCase
 from django.urls import reverse
@@ -14,6 +15,8 @@ from .services.context.recent_messages import RecentMessagesService
 from .services.context.manager import ContextManager
 from .services.context.summary import SummaryService
 from apps.chat.services.llm.client import LLMClient
+from .services.llm.schemas import AIResponse
+from .services.llm.structured_output import StructuredOutputService
 
 
 class ConversationAPITests(APITestCase):
@@ -1291,3 +1294,55 @@ class LLMClientTests(TestCase):
             ],
             stream=True,
         )
+
+
+class StructuredOutputServiceTests(TestCase):
+
+    @patch(
+        'apps.chat.services.llm.structured_output.LLMClient.send_json_message'
+    )
+    def test_valid_response(self, mock_send_json_message):
+        mock_send_json_message.return_value = (
+            '{"answer": "Python is a programming language.", '
+            '"confidence": 0.95}'
+        )
+
+        service = StructuredOutputService()
+
+        response = service.get_response([])
+
+        self.assertIsInstance(response, AIResponse)
+        self.assertEqual(
+            response.answer,
+            'Python is a programming language.',
+        )
+        self.assertEqual(
+            response.confidence,
+            0.95,
+        )
+
+    @patch(
+        'apps.chat.services.llm.structured_output.LLMClient.send_json_message'
+    )
+    def test_invalid_schema(self, mock_send_json_message):
+        mock_send_json_message.return_value = (
+            '{"answer": "Python", "confidence": "high"}'
+        )
+
+        service = StructuredOutputService()
+
+        with self.assertRaises(ValidationError):
+            service.get_response([])
+
+    @patch(
+        'apps.chat.services.llm.structured_output.LLMClient.send_json_message'
+    )
+    def test_llm_error(self, mock_send_json_message):
+        mock_send_json_message.side_effect = LLMException(
+            'LLM server error.'
+        )
+
+        service = StructuredOutputService()
+
+        with self.assertRaises(LLMException):
+            service.get_response([])

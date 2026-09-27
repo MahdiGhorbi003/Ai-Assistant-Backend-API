@@ -17,7 +17,7 @@ class LLMClient:
 
         self.model = 'nvidia/nemotron-3-ultra-550b-a55b:free'
 
-    def send_message(self, messages):
+    def _send_request(self, messages, response_format=None):
 
         try:
             logger.info('sending request to LLM')
@@ -25,6 +25,7 @@ class LLMClient:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
+                response_format=response_format,
             )
 
             return response.choices[0].message.content
@@ -68,6 +69,19 @@ class LLMClient:
                 raise LLMException(
                     'LLM API returned an error.'
                 )
+
+    def send_message(self, messages):
+        return self._send_request(
+            messages=messages,
+        )
+
+    def send_json_message(self, messages):
+        return self._send_request(
+            messages=messages,
+            response_format={
+                'type': 'json_object',
+            },
+        )
 
     def stream_messages(self, messages):
         response = self.client.chat.completions.create(
