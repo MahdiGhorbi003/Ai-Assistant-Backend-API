@@ -99,7 +99,7 @@ class ConversationAPITests(APITestCase):
         )
 
         self.assertEqual(
-            len(response.data),
+            len(response.data['results']),
             2,
         )
 
@@ -473,12 +473,12 @@ class MessageAPITests(APITestCase):
         )
 
         self.assertEqual(
-            len(response.data),
+            len(response.data['results']),
             1,
         )
 
         self.assertEqual(
-            response.data[0]['content'],
+            response.data['results'][0]['content'],
             'My message',
         )
 

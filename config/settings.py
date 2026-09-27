@@ -20,7 +20,6 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(dotenv_path=BASE_DIR / '.env')
 
-
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
@@ -31,7 +30,6 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 DEBUG = True
 
 ALLOWED_HOSTS = []
-
 
 # Application definition
 
@@ -78,7 +76,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
@@ -92,7 +89,6 @@ DATABASES = {
         'PORT': os.getenv('DB_PORT', '5432'),
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
@@ -112,7 +108,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
@@ -124,12 +119,10 @@ USE_I18N = True
 
 USE_TZ = True
 
-
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
-
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
@@ -157,6 +150,11 @@ REST_FRAMEWORK = {
 
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 
+    'DEFAULT_PAGINATION_CLASS':
+        'rest_framework.pagination.PageNumberPagination',
+
+    'PAGE_SIZE': 10
+
 }
 
 SIMPLE_JWT = {
@@ -167,9 +165,8 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-
 SPECTACULAR_SETTINGS = {
-    'TITLE':'AI Assistant API',
+    'TITLE': 'AI Assistant API',
     'DESCRIPTION': 'Backend API for an AI Assistant ',
     'VERSION': '1.0.0',
 }
@@ -187,8 +184,8 @@ LOGGING = {
     'loggers': {
         'apps.chat': {
             'handlers': ['console'],
-                'level': 'INFO',
-                'propagate': False,
+            'level': 'INFO',
+            'propagate': False,
         },
     },
 }

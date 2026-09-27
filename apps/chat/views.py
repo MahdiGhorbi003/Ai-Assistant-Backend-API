@@ -34,7 +34,7 @@ class MessageViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Message.objects.filter(
             conversation__user=self.request.user
-        )
+        ).order_by('created_at')
 
     def create(self, request, *args, **kwargs):
 
