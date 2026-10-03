@@ -6,7 +6,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework.filters import SearchFilter
+from rest_framework.filters import SearchFilter, OrderingFilter
 
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer
@@ -35,15 +35,18 @@ class MessageViewSet(viewsets.ModelViewSet):
     filter_backends = (
         SearchFilter,
         DjangoFilterBackend,
+        OrderingFilter,
     )
 
     filterset_fields = ('role',)
     search_fields = ('content',)
+    ordering_fields = ('created_at',)
+    ordering = ('created_at',)
 
     def get_queryset(self):
         return Message.objects.filter(
             conversation__user=self.request.user
-        ).order_by('created_at')
+        )
 
     def create(self, request, *args, **kwargs):
 
