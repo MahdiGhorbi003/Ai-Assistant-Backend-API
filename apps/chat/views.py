@@ -1,6 +1,5 @@
-from re import search
-
 from django.http import StreamingHttpResponse
+from django_filters.rest_framework import DjangoFilterBackend
 
 from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
@@ -33,7 +32,12 @@ class ConversationViewSet(viewsets.ModelViewSet):
 class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
     permission_classes = (IsAuthenticated,)
-    filter_backends = (SearchFilter,)
+    filter_backends = (
+        SearchFilter,
+        DjangoFilterBackend,
+    )
+
+    filterset_fields = ('role',)
     search_fields = ('content',)
 
     def get_queryset(self):
