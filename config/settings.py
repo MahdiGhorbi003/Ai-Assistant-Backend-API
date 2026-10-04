@@ -142,11 +142,12 @@ REST_FRAMEWORK = {
     ),
 
     'DEFAULT_THROTTLE_CLASSES': (
-        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
     ),
 
     'DEFAULT_THROTTLE_RATES': {
-        'user': '10/min',
+        'message': '10/min',
+        'stream': '5/min',
     },
 
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
@@ -158,7 +159,7 @@ REST_FRAMEWORK = {
 
     'DEFAULT_FILTER_BACKENDS': (
         'django_filters.rest_framework.DjangoFilterBackend',
-),
+    ),
 
 }
 

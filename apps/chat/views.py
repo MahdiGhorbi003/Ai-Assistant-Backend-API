@@ -7,6 +7,7 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.throttling import ScopedRateThrottle
 
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer
@@ -32,6 +33,8 @@ class ConversationViewSet(viewsets.ModelViewSet):
 class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
     permission_classes = (IsAuthenticated,)
+    throttle_scope = 'message'
+
     filter_backends = (
         SearchFilter,
         DjangoFilterBackend,
@@ -47,6 +50,14 @@ class MessageViewSet(viewsets.ModelViewSet):
         return Message.objects.filter(
             conversation__user=self.request.user
         )
+
+    def get_throttles(self):
+        if self.action == 'stream':
+            self.throttle_scope = 'stream'
+        else:
+            self.throttle_scope = 'message'
+
+        return [ScopedRateThrottle()]
 
     def create(self, request, *args, **kwargs):
 
