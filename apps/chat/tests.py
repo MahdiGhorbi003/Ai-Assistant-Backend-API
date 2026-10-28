@@ -1,8 +1,12 @@
+import uuid
+
 from unittest.mock import patch, MagicMock
 from pydantic import ValidationError
 
 from django.test import TestCase
 from django.urls import reverse
+from django.core.cache import cache
+from django.test import override_settings
 
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -17,6 +21,7 @@ from .services.context.summary import SummaryService
 from apps.chat.services.llm.client import LLMClient
 from .services.llm.schemas import AIResponse
 from .services.llm.structured_output import StructuredOutputService
+from .views import ConversationViewSet
 
 
 class ConversationAPITests(APITestCase):
@@ -352,6 +357,165 @@ class MessageAPITests(APITestCase):
         )
 
         mock_send_message.assert_called_once()
+
+    @patch(
+        'apps.chat.services.llm_service.LLMClient.send_message'
+    )
+    def test_repeated_request_with_same_idempotency_key(
+            self,
+            mock_send_message,
+    ):
+        mock_send_message.return_value = 'Hello from AI'
+
+        data = {
+            'conversation': self.conversation.id,
+            'content': 'hello django',
+        }
+
+        headers = {
+            'HTTP_IDEMPOTENCY_KEY': f'test-{uuid.uuid4().hex}',
+        }
+
+        first_response = self.client.post(
+            self.list_url,
+            data=data,
+            format='json',
+            **headers,
+        )
+
+        second_response = self.client.post(
+            self.list_url,
+            data=data,
+            format='json',
+            **headers,
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            first_response.data,
+            second_response.data,
+        )
+
+        mock_send_message.assert_called_once()
+
+        self.assertEqual(
+            Message.objects.count(),
+            2,
+        )
+
+    @patch(
+        'apps.chat.services.llm_service.LLMClient.send_message'
+    )
+    def test_same_idempotency_key_with_different_data(
+            self,
+            mock_send_message,
+    ):
+        mock_send_message.return_value = 'Hello from AI'
+
+        headers = {
+            'HTTP_IDEMPOTENCY_KEY': f'test-{uuid.uuid4().hex}',
+        }
+
+        first_response = self.client.post(
+            self.list_url,
+            data={
+                'conversation': self.conversation.id,
+                'content': 'hello django',
+            },
+            format='json',
+            **headers,
+        )
+
+        second_response = self.client.post(
+            self.list_url,
+            data={
+                'conversation': self.conversation.id,
+                'content': 'different message',
+            },
+            format='json',
+            **headers,
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_409_CONFLICT,
+        )
+
+        mock_send_message.assert_called_once()
+
+        self.assertEqual(
+            Message.objects.count(),
+            2,
+        )
+
+    @patch(
+        'apps.chat.services.llm_service.LLMClient.send_message'
+    )
+    def test_idempotency_allows_retry_after_llm_error(
+            self,
+            mock_send_message,
+    ):
+        mock_send_message.side_effect = [
+            LLMException('LLM server error.'),
+            'Hello from AI',
+        ]
+
+        headers = {
+            'HTTP_IDEMPOTENCY_KEY': f'test-{uuid.uuid4().hex}',
+        }
+
+        data = {
+            'conversation': self.conversation.id,
+            'content': 'hello django',
+        }
+
+        first_response = self.client.post(
+            self.list_url,
+            data=data,
+            format='json',
+            **headers,
+        )
+
+        second_response = self.client.post(
+            self.list_url,
+            data=data,
+            format='json',
+            **headers,
+        )
+
+        self.assertEqual(
+            first_response.status_code,
+            status.HTTP_502_BAD_GATEWAY,
+        )
+
+        self.assertEqual(
+            second_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        self.assertEqual(
+            second_response.data['response'],
+            'Hello from AI',
+        )
+
+        self.assertEqual(
+            mock_send_message.call_count,
+            2,
+        )
 
     @patch(
         'apps.chat.services.llm_service.LLMService.stream_message'
@@ -1346,3 +1510,187 @@ class StructuredOutputServiceTests(TestCase):
 
         with self.assertRaises(LLMException):
             service.get_response([])
+
+
+@override_settings(
+    CACHES={
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': 'redis://redis:6379/2',
+        }
+    }
+)
+class ConversationCacheTests(APITestCase):
+
+    def setUp(self):
+        cache.clear()
+
+        self.user = CustomUser.objects.create_user(
+            email='cache_test@gmail.com',
+            password='StrongPass123!',
+        )
+
+        self.client.force_authenticate(user=self.user)
+        self.list_url = reverse('chat:conversation-list')
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_second_list_request_uses_cache(self):
+        Conversation.objects.create(
+            user=self.user,
+            title='Cached conversation',
+        )
+
+        original_filter_queryset = ConversationViewSet.filter_queryset
+
+        with patch.object(
+            ConversationViewSet,
+            'filter_queryset',
+            autospec=True,
+            side_effect=original_filter_queryset,
+        ) as mocked_filter:
+            first_response = self.client.get(self.list_url)
+            second_response = self.client.get(self.list_url)
+
+        self.assertEqual(first_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(second_response.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(mocked_filter.call_count, 1)
+        self.assertEqual(
+            first_response.data,
+            second_response.data,
+        )
+
+    def test_cache_is_isolated_between_users(self):
+        Conversation.objects.create(
+            user=self.user,
+            title='User A conversation',
+        )
+
+        first_response = self.client.get(self.list_url)
+
+        other_user = CustomUser.objects.create_user(
+            email='other_cache_test@gmail.com',
+            password='StrongPass123!',
+        )
+
+        Conversation.objects.create(
+            user=other_user,
+            title='User B conversation',
+        )
+
+        self.client.force_authenticate(user=other_user)
+
+        second_response = self.client.get(self.list_url)
+
+        first_titles = [
+            item['title']
+            for item in first_response.data['results']
+        ]
+        second_titles = [
+            item['title']
+            for item in second_response.data['results']
+        ]
+
+        self.assertEqual(first_titles, ['User A conversation'])
+        self.assertEqual(second_titles, ['User B conversation'])
+
+    def test_create_conversation_invalidates_list_cache(self):
+        Conversation.objects.create(
+            user=self.user,
+            title='First conversation',
+        )
+
+        first_response = self.client.get(self.list_url)
+
+        self.assertEqual(
+            len(first_response.data['results']),
+            1,
+        )
+
+        create_response = self.client.post(
+            self.list_url,
+            {'title': 'Second conversation'},
+            format='json',
+        )
+
+        self.assertEqual(
+            create_response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        second_response = self.client.get(self.list_url)
+
+        self.assertEqual(
+            len(second_response.data['results']),
+            2,
+        )
+
+    def test_update_conversation_invalidates_list_cache(self):
+        conversation = Conversation.objects.create(
+            user=self.user,
+            title='Original title',
+        )
+
+        first_response = self.client.get(self.list_url)
+
+        self.assertEqual(
+            first_response.data['results'][0]['title'],
+            'Original title',
+        )
+
+        update_url = reverse(
+            'chat:conversation-detail',
+            kwargs={'pk': conversation.id},
+        )
+
+        update_response = self.client.patch(
+            update_url,
+            {'title': 'Updated title'},
+            format='json',
+        )
+
+        self.assertEqual(
+            update_response.status_code,
+            status.HTTP_200_OK,
+        )
+
+        second_response = self.client.get(self.list_url)
+
+        self.assertEqual(
+            second_response.data['results'][0]['title'],
+            'Updated title',
+        )
+
+    def test_delete_conversation_invalidates_list_cache(self):
+        conversation = Conversation.objects.create(
+            user=self.user,
+            title='Conversation to delete',
+        )
+
+        first_response = self.client.get(self.list_url)
+
+        self.assertEqual(
+            len(first_response.data['results']),
+            1,
+        )
+
+        delete_url = reverse(
+            'chat:conversation-detail',
+            kwargs={'pk': conversation.id},
+        )
+
+        delete_response = self.client.delete(delete_url)
+
+        self.assertEqual(
+            delete_response.status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
+
+        second_response = self.client.get(self.list_url)
+
+        self.assertEqual(
+            len(second_response.data['results']),
+            0,
+        )
