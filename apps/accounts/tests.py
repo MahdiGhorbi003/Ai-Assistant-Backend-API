@@ -109,6 +109,56 @@ class AuthenticationAPITests(APITestCase):
             1,
         )
 
+    def test_register_weak_password(self):
+        url = reverse('accounts:register')
+
+        data = {
+            'email': 'weak_password@gmail.com',
+            'password': 'Ab1!',
+        }
+
+        response = self.client.post(
+            url,
+            data,
+            format='json',
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertFalse(
+            CustomUser.objects.filter(
+                email=data['email']
+            ).exists()
+        )
+
+    def test_register_invalid_email(self):
+        url = reverse('accounts:register')
+
+        data = {
+            'email': 'invalid-email',
+            'password': 'StrongPass123!',
+        }
+
+        response = self.client.post(
+            url,
+            data,
+            format='json',
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertFalse(
+            CustomUser.objects.filter(
+                email='invalid-email'
+            ).exists()
+        )
+
     def test_login_success(self):
         email = 'login@gmail.com'
         password = 'StrongPass123!'
