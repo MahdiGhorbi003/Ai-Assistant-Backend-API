@@ -1,12 +1,21 @@
 import hashlib
 import json
 import uuid
-import redis
-from django.conf import settings
 
+import redis
+
+from django.conf import settings
 from django.http import StreamingHttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.cache import cache
+
+from drf_spectacular.utils import (
+    extend_schema,
+    inline_serializer,
+    OpenApiParameter,
+    OpenApiResponse,
+    extend_schema_view,
+)
 
 from rest_framework import viewsets, status
 from rest_framework.permissions import IsAuthenticated
@@ -15,11 +24,13 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.throttling import ScopedRateThrottle
+from rest_framework import serializers
 
 from .models import Conversation, Message
 from .serializers import ConversationSerializer, MessageSerializer
 from .services.llm_service import LLMService
 from .services.llm.exceptions import LLMException
+
 
 idempotency_redis = redis.Redis.from_url(
     settings.CACHES['default']['LOCATION'],
@@ -29,11 +40,22 @@ idempotency_redis = redis.Redis.from_url(
 IDEMPOTENCY_TTL = 60 * 5
 IDEMPOTENCY_LOCK_TTL = 60 * 5
 
+@extend_schema_view(
+    list=extend_schema(tags=['Conversations']),
+    create=extend_schema(tags=['Conversations']),
+    retrieve=extend_schema(tags=['Conversations']),
+    update=extend_schema(tags=['Conversations']),
+    partial_update=extend_schema(tags=['Conversations']),
+    destroy=extend_schema(tags=['Conversations']),
+)
 class ConversationViewSet(viewsets.ModelViewSet):
     serializer_class = ConversationSerializer
     permission_classes = (IsAuthenticated,)
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Conversation.objects.none()
+
         return Conversation.objects.filter(
             user=self.request.user
         )
@@ -79,6 +101,13 @@ class ConversationViewSet(viewsets.ModelViewSet):
         return response
 
 
+@extend_schema_view(
+    list=extend_schema(tags=['Messages']),
+    retrieve=extend_schema(tags=['Messages']),
+    update=extend_schema(tags=['Messages']),
+    partial_update=extend_schema(tags=['Messages']),
+    destroy=extend_schema(tags=['Messages']),
+)
 class MessageViewSet(viewsets.ModelViewSet):
     serializer_class = MessageSerializer
     permission_classes = (IsAuthenticated,)
@@ -96,6 +125,9 @@ class MessageViewSet(viewsets.ModelViewSet):
     ordering = ('created_at',)
 
     def get_queryset(self):
+        if getattr(self, 'swagger_fake_view', False):
+            return Message.objects.none()
+
         return Message.objects.filter(
             conversation__user=self.request.user
         )
@@ -108,6 +140,35 @@ class MessageViewSet(viewsets.ModelViewSet):
 
         return [ScopedRateThrottle()]
 
+    @extend_schema(
+        summary='Send a message',
+        description='Send a message to an AI assistant and receive a response.',
+        tags=['Messages'],
+        request=MessageSerializer,
+        responses={
+            200: inline_serializer(
+                name='MessageCreateResponse',
+                fields={
+                    'response': serializers.CharField(),
+                },
+            ),
+            409: OpenApiResponse(
+                description='Idempotency conflict or request already in progress.',
+            ),
+            502: OpenApiResponse(
+                description='The LLM service failed to process the request.',
+            ),
+        },
+        parameters=[
+            OpenApiParameter(
+                name='Idempotency-Key',
+                type=str,
+                location=OpenApiParameter.HEADER,
+                required=False,
+                description='Optional key to prevent duplicate message processing.',
+            ),
+        ],
+    )
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -253,6 +314,18 @@ class MessageViewSet(viewsets.ModelViewSet):
             except redis.exceptions.RedisError:
                 pass
 
+    @extend_schema(
+        summary='Stream an AI response',
+        description='Send a message and receive the AI response as a text stream.',
+        tags=['Messages'],
+        request=MessageSerializer,
+        responses={
+            (200, 'text/plain'): OpenApiResponse(
+                response=str,
+                description='Streaming AI response as plain text.',
+            ),
+        },
+    )
     @action(detail=False, methods=['post'], url_path='stream')
     def stream(self, request, *args, **kwargs):
 

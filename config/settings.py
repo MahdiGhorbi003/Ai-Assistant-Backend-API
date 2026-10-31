@@ -172,9 +172,14 @@ SIMPLE_JWT = {
 }
 
 SPECTACULAR_SETTINGS = {
-    'TITLE': 'AI Assistant API',
-    'DESCRIPTION': 'Backend API for an AI Assistant ',
-    'VERSION': '1.0.0',
+    'TITLE': 'AI Assistant Backend API',
+    'DESCRIPTION': (
+        'RESTful API for an AI Assistant application. '
+        'Provides authentication, conversation management, '
+        'message handling, and LLM integration.'
+    ),
+    'VERSION': '2.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
 }
 
 LOGGING = {
