@@ -1,4 +1,5 @@
 import uuid
+import openai
 
 from unittest.mock import patch, MagicMock
 from pydantic import ValidationError
@@ -1458,6 +1459,33 @@ class LLMClientTests(TestCase):
             ],
             stream=True,
         )
+
+    @patch('apps.chat.services.llm.client.openai.OpenAI')
+    def test_stream_messages_timeout(self, mock_openai):
+        import httpx
+
+        mock_openai.return_value.chat.completions.create.side_effect = (
+            openai.APITimeoutError(
+                request=httpx.Request(
+                    'POST',
+                    'https://openrouter.ai/api/v1/chat/completions',
+                )
+            )
+        )
+
+        client = LLMClient()
+
+        with self.assertRaises(LLMException):
+            list(
+                client.stream_messages(
+                    messages=[
+                        {
+                            'role': 'user',
+                            'content': 'Hello',
+                        }
+                    ]
+                )
+            )
 
 
 class StructuredOutputServiceTests(TestCase):

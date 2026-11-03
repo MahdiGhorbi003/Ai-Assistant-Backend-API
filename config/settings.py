@@ -186,9 +186,22 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
 
+    'formatters': {
+        'json': {
+            '()': 'pythonjsonlogger.json.JsonFormatter',
+            'fmt': '%(asctime)s %(levelname)s %(name)s %(message)s',
+            'rename_fields': {
+                'asctime': 'timestamp',
+                'levelname': 'level',
+                'name': 'logger',
+            },
+        },
+    },
+
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
+            'formatter': 'json',
         },
     },
 

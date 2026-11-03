@@ -20,7 +20,13 @@ class LLMClient:
     def _send_request(self, messages, response_format=None):
 
         try:
-            logger.info('sending request to LLM')
+            logger.info(
+                'sending request to LLM',
+                extra={
+                    'event': 'llm_request_started',
+                    'model': self.model,
+                },
+            )
 
             response = self.client.chat.completions.create(
                 model=self.model,
@@ -31,24 +37,42 @@ class LLMClient:
             return response.choices[0].message.content
 
         except openai.APITimeoutError:
-            logger.error('LLM request timed out')
+            logger.exception(
+                'LLM request timed out',
+                extra={'event': 'llm_request_timeout'},
+            )
             raise LLMException(
                 'LLM request timed out.'
             )
 
         except openai.APIConnectionError:
-            logger.error('Failed to connect to LLM')
+            logger.exception(
+                'Failed to connect to LLM',
+                extra={'event': 'llm_connection_error'},
+            )
             raise LLMException(
                 'Failed to connect to LLM.'
             )
 
         except openai.RateLimitError:
-            logger.error('LLM rate limit exceeded')
+            logger.error(
+                'LLM rate limit exceeded',
+                extra={'event': 'llm_rate_limit_exceeded'},
+            )
             raise LLMException(
                 'LLM rate limit exceeded.'
             )
 
         except openai.APIStatusError as exception:
+
+            logger.error(
+                'LLM API returned an error',
+                extra={
+                    'event': 'llm_api_error',
+                    'model': self.model,
+                    'status_code': exception.status_code,
+                },
+            )
 
             if exception.status_code == 401:
                 raise LLMException(
@@ -84,14 +108,65 @@ class LLMClient:
         )
 
     def stream_messages(self, messages):
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            stream=True,
-        )
+        try:
+            logger.info(
+                'Sending streaming request to LLM',
+                extra={
+                    'event': 'llm_stream_started',
+                    'model': self.model,
+                },
+            )
 
-        for chunk in response:
-            content = chunk.choices[0].delta.content
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                stream=True,
+            )
 
-            if content:
-                yield content
+            for chunk in response:
+                content = chunk.choices[0].delta.content
+
+                if content:
+                    yield content
+
+        except openai.APITimeoutError:
+            logger.exception(
+                'LLM streaming request timed out',
+                extra={'event': 'llm_stream_timeout'},
+            )
+            raise LLMException('LLM request timed out.')
+
+        except openai.APIConnectionError:
+            logger.exception(
+                'Failed to connect to LLM during streaming',
+                extra={'event': 'llm_stream_connection_error'},
+            )
+            raise LLMException('Failed to connect to LLM.')
+
+        except openai.RateLimitError:
+            logger.error(
+                'LLM streaming rate limit exceeded',
+                extra={'event': 'llm_stream_rate_limit_exceeded'},
+            )
+            raise LLMException(
+                'LLM rate limit exceeded.'
+            )
+
+        except openai.APIStatusError as exception:
+            logger.error(
+                'LLM streaming API returned an error',
+                extra={
+                    'event': 'llm_stream_api_error',
+                    'model': self.model,
+                    'status_code': exception.status_code,
+                },
+            )
+
+            if exception.status_code == 401:
+                raise LLMException('LLM authentication failed.')
+            elif exception.status_code == 404:
+                raise LLMException('LLM resource not found.')
+            elif exception.status_code >= 500:
+                raise LLMException('LLM server error.')
+            else:
+                raise LLMException('LLM API returned an error.')
