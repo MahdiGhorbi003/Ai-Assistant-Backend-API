@@ -10,9 +10,9 @@ The project is being developed incrementally, with each version adding a new lay
 
 ## Current Version
 
-**V1.0.0 — Core AI Backend**
+**V2.0.0 — Backend Hardening + AI Context**
 
-V1 focuses on building a solid backend foundation for an AI Assistant, including authentication, conversations, messages, LLM integration, permissions, validation, rate limiting, testing, API documentation, logging, and Docker.
+V2 builds on the core backend foundation introduced in V1, adding Redis integration, AI context management, conversation summarization, streaming responses, structured output, improved testing, API documentation, and structured logging.
 
 ---
 
@@ -38,8 +38,12 @@ Authenticated users can:
 * Retrieve a conversation
 * Update a conversation
 * Delete a conversation
+* Search and filter conversations
+* Paginate conversation results
 
 Each conversation belongs to its owner.
+
+Conversation list results are cached using Redis, with cache invalidation when conversations are created, updated, or deleted.
 
 ### Messages
 
@@ -51,8 +55,9 @@ Users can:
 * Store assistant messages
 * Retrieve conversation messages
 * Keep conversation history
+* Receive streaming AI responses
 
-The LLM service builds the conversation history and sends it to the LLM provider.
+The API also supports idempotency for message creation through the `Idempotency-Key` header.
 
 ### LLM Integration
 
@@ -63,9 +68,12 @@ The LLM integration includes:
 * LLM client
 * Conversation history
 * LLM service layer
+* Context management
 * Error handling
 * Provider error mapping
-* Basic logging
+* System prompts
+* Token management
+* Structured JSON output
 
 ### Permissions
 
@@ -82,16 +90,25 @@ The API validates:
 * Password requirements
 * Empty conversation titles
 * Empty message content
+* Structured LLM output using Pydantic schemas
 
 Message roles are read-only so clients cannot manually create assistant messages through the API.
 
 ### Rate Limiting
 
-V1 includes basic per-user rate limiting.
+The project uses scoped per-user rate limiting.
 
-**Limit:** `10 requests / minute`
+* Message creation: `10 requests / minute`
+* Message streaming: `5 requests / minute`
 
-More advanced rate limiting and Redis-based infrastructure are planned for V2.
+### Redis
+
+Redis is used for:
+
+* Conversation list caching
+* Cache invalidation
+* Message idempotency
+* Idempotency locking
 
 ### Testing
 
@@ -106,12 +123,18 @@ The project includes tests for:
 * Refresh token
 * Conversation CRUD
 * Conversation ownership
-* Message CRUD
+* Message operations
 * Message ownership
 * Authentication requirements
 * LLM service
 * Conversation history
-* LLM integration flow
+* Context management
+* Conversation summarization
+* Streaming responses
+* Structured output
+* Redis caching
+* Message idempotency
+* Rate limiting
 
 ### API Documentation
 
@@ -137,9 +160,9 @@ schema.yml
 
 ### Logging
 
-Basic application logging is configured for the chat application.
+The project uses structured JSON logging through `python-json-logger`.
 
-LLM requests and common LLM errors are logged at the application level.
+Application logs include timestamps, log levels, logger names, and messages.
 
 ### Docker
 
@@ -149,6 +172,7 @@ The project includes:
 * Docker Compose
 * PostgreSQL container
 * Django application container
+* Redis container
 
 ---
 
@@ -156,12 +180,16 @@ The project includes:
 
 * Python 3.12
 * Django 6.1
-* Django REST Framework
+* Django REST Framework 3.18
 * PostgreSQL 16
+* Redis 7
 * Simple JWT
 * OpenRouter
 * OpenAI Python SDK
+* Pydantic
 * drf-spectacular
+* django-filter
+* python-json-logger
 * Docker
 * Docker Compose
 * python-dotenv
@@ -192,8 +220,15 @@ Serializers
   ▼
 Services
   │
-  ▼
-LLM Client
+  ├── Context Management
+  │     ├── Recent Messages
+  │     ├── System Prompt
+  │     ├── Token Management
+  │     └── Conversation Summary
+  │
+  ├── LLM Service
+  │     ├── LLM Client
+  │     └── Structured Output
   │
   ▼
 OpenRouter
@@ -204,7 +239,9 @@ LLM
 
 Conversation and message data are stored in PostgreSQL.
 
-The LLM integration is separated into a client and service layer so that application logic is not directly coupled to the external LLM provider.
+Redis is used for caching and idempotency.
+
+The LLM integration is separated into client and service layers so that application logic is not directly coupled to the external LLM provider.
 
 ---
 
@@ -229,10 +266,20 @@ AI-Assistant-Backend-API/
 │   └── chat/
 │       ├── migrations/
 │       ├── services/
-│       │   └── llm/
-│       │       ├── client.py
-│       │       ├── exceptions.py
-│       │       └── __init__.py
+│       │   ├── context/
+│       │   │   ├── manager.py
+│       │   │   ├── recent_messages.py
+│       │   │   ├── summary.py
+│       │   │   ├── system_prompt.py
+│       │   │   └── token_manager.py
+│       │   │
+│       │   ├── llm/
+│       │   │   ├── client.py
+│       │   │   ├── exceptions.py
+│       │   │   ├── schemas.py
+│       │   │   └── structured_output.py
+│       │   │
+│       │   └── llm_service.py
 │       │
 │       ├── admin.py
 │       ├── apps.py
@@ -282,9 +329,13 @@ Then configure the required variables:
 DB_NAME=
 DB_USER=
 DB_PASSWORD=
-DB_HOST=
+DB_HOST=127.0.0.1
 DB_PORT=5432
+
 DJANGO_SECRET_KEY=
+DJANGO_DEBUG=True
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+
 OPENROUTER_API_KEY=
 ```
 
@@ -346,33 +397,34 @@ All application API endpoints are available under:
 
 ### Authentication
 
-| Method | Endpoint                 | Description                      |
-| ------ | ------------------------ | -------------------------------- |
-| POST   | `/api/v1/auth/register/` | Register a new user              |
-| POST   | `/api/v1/auth/login/`    | Obtain access and refresh tokens |
-| POST   | `/api/v1/auth/refresh/`  | Refresh an access token          |
+| Method | Endpoint | Description |
+| ------ | -------- | ----------- |
+| POST | `/api/v1/auth/register/` | Register a new user |
+| POST | `/api/v1/auth/login/` | Obtain access and refresh tokens |
+| POST | `/api/v1/auth/refresh/` | Refresh an access token |
 
 ### Conversations
 
-| Method | Endpoint                      | Description                     |
-| ------ | ----------------------------- | ------------------------------- |
-| GET    | `/api/v1/conversations/`      | List user's conversations       |
-| POST   | `/api/v1/conversations/`      | Create a conversation           |
-| GET    | `/api/v1/conversations/{id}/` | Retrieve a conversation         |
-| PUT    | `/api/v1/conversations/{id}/` | Update a conversation           |
-| PATCH  | `/api/v1/conversations/{id}/` | Partially update a conversation |
-| DELETE | `/api/v1/conversations/{id}/` | Delete a conversation           |
+| Method | Endpoint | Description |
+| ------ | -------- | ----------- |
+| GET | `/api/v1/conversations/` | List user's conversations |
+| POST | `/api/v1/conversations/` | Create a conversation |
+| GET | `/api/v1/conversations/{id}/` | Retrieve a conversation |
+| PUT | `/api/v1/conversations/{id}/` | Update a conversation |
+| PATCH | `/api/v1/conversations/{id}/` | Partially update a conversation |
+| DELETE | `/api/v1/conversations/{id}/` | Delete a conversation |
 
 ### Messages
 
-| Method | Endpoint                 | Description                               |
-| ------ | ------------------------ | ----------------------------------------- |
-| GET    | `/api/v1/messages/`      | List user's messages                      |
-| POST   | `/api/v1/messages/`      | Send a message and receive an AI response |
-| GET    | `/api/v1/messages/{id}/` | Retrieve a message                        |
-| PUT    | `/api/v1/messages/{id}/` | Update a message                          |
-| PATCH  | `/api/v1/messages/{id}/` | Partially update a message                |
-| DELETE | `/api/v1/messages/{id}/` | Delete a message                          |
+| Method | Endpoint | Description |
+| ------ | -------- | ----------- |
+| GET | `/api/v1/messages/` | List user's messages |
+| POST | `/api/v1/messages/` | Send a message and receive an AI response |
+| GET | `/api/v1/messages/{id}/` | Retrieve a message |
+| PUT | `/api/v1/messages/{id}/` | Update a message |
+| PATCH | `/api/v1/messages/{id}/` | Partially update a message |
+| DELETE | `/api/v1/messages/{id}/` | Delete a message |
+| POST | `/api/v1/messages/stream/` | Stream an AI response |
 
 ---
 
@@ -443,17 +495,11 @@ Example:
 }
 ```
 
-The backend sends the conversation history to the LLM and returns the generated response.
-
-Example response:
-
-```json
-{
-  "response": "Django REST Framework is..."
-}
-```
+The backend builds the conversation context and sends it to the LLM.
 
 The user message and assistant response are stored in the database.
+
+For message creation requests, an `Idempotency-Key` header can be used to prevent duplicate processing.
 
 ---
 
@@ -461,15 +507,17 @@ The user message and assistant response are stored in the database.
 
 The following environment variables are required:
 
-| Variable             | Description              |
-| -------------------- | ------------------------ |
-| `DB_NAME`            | PostgreSQL database name |
-| `DB_USER`            | PostgreSQL username      |
-| `DB_PASSWORD`        | PostgreSQL password      |
-| `DB_HOST`            | PostgreSQL host          |
-| `DB_PORT`            | PostgreSQL port          |
-| `DJANGO_SECRET_KEY`  | Django secret key        |
-| `OPENROUTER_API_KEY` | OpenRouter API key       |
+| Variable | Description |
+| -------- | ----------- |
+| `DB_NAME` | PostgreSQL database name |
+| `DB_USER` | PostgreSQL username |
+| `DB_PASSWORD` | PostgreSQL password |
+| `DB_HOST` | PostgreSQL host |
+| `DB_PORT` | PostgreSQL port |
+| `DJANGO_SECRET_KEY` | Django secret key |
+| `DJANGO_DEBUG` | Enable or disable Django debug mode |
+| `DJANGO_ALLOWED_HOSTS` | Allowed hostnames |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
 
 ---
 
@@ -502,25 +550,23 @@ The following environment variables are required:
 
 ### V2.0.0 — Backend Hardening + AI Context
 
-Planned features:
-
 * Recent message context
 * System prompts
 * Token management
 * Conversation summarization
 * Streaming responses
 * Structured JSON output
-* Schema validation
-* Typed responses
+* Pydantic schema validation
 * Pagination
 * Search
 * Filtering
 * Ordering
-* Advanced rate limiting
-* Redis
+* Scoped rate limiting
+* Redis caching
+* Message idempotency
 * Expanded testing
 * Improved API documentation
-* Structured logging
+* Structured JSON logging
 
 ### V3.0.0 — Tool Calling
 
@@ -607,6 +653,7 @@ The focus is on learning and applying:
 * Testing
 * Docker
 * API documentation
+* Logging
 * AI application development
 * Git and version control
 
@@ -614,11 +661,11 @@ The focus is on learning and applying:
 
 ## Project Status
 
-**Current release: V1.0.0**
+**Current release: V2.0.0**
 
-V1 provides the core backend infrastructure for an AI Assistant, including authentication, conversation management, message handling, LLM integration, permissions, validation, rate limiting, testing, documentation, logging, and Docker support.
+V2 builds on the core backend foundation and adds Redis integration, context management, conversation summarization, streaming, structured output, expanded testing, improved API documentation, and structured logging.
 
-Future versions will extend the system with context management, streaming, structured output, tool calling, RAG, Redis, Celery, and production-oriented infrastructure.
+Future versions will extend the system with tool calling, RAG, and background processing.
 
 ---
 

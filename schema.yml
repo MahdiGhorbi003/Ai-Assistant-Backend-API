@@ -1,155 +1,10 @@
 openapi: 3.0.3
 info:
-  title: AI Assistant API
-  version: 1.0.0
-  description: 'Backend API for an AI Assistant '
+  title: AI Assistant Backend API
+  version: 2.0.0
+  description: RESTful API for an AI Assistant application. Provides authentication,
+    conversation management, message handling, and LLM integration.
 paths:
-  /api/schema/:
-    get:
-      operationId: schema_retrieve
-      description: |-
-        OpenApi3 schema for this API. Format can be selected via content negotiation.
-
-        - YAML: application/vnd.oai.openapi
-        - JSON: application/vnd.oai.openapi+json
-      parameters:
-      - in: query
-        name: format
-        schema:
-          type: string
-          enum:
-          - json
-          - yaml
-      - in: query
-        name: lang
-        schema:
-          type: string
-          enum:
-          - af
-          - ar
-          - ar-dz
-          - ast
-          - az
-          - be
-          - bg
-          - bn
-          - br
-          - bs
-          - ca
-          - ckb
-          - cs
-          - cy
-          - da
-          - de
-          - dsb
-          - el
-          - en
-          - en-au
-          - en-gb
-          - eo
-          - es
-          - es-ar
-          - es-co
-          - es-mx
-          - es-ni
-          - es-ve
-          - et
-          - eu
-          - fa
-          - fi
-          - fr
-          - fy
-          - ga
-          - gd
-          - gl
-          - he
-          - hi
-          - hr
-          - hsb
-          - ht
-          - hu
-          - hy
-          - ia
-          - id
-          - ig
-          - io
-          - is
-          - it
-          - ja
-          - ka
-          - kab
-          - kk
-          - km
-          - kn
-          - ko
-          - ky
-          - lb
-          - lt
-          - lv
-          - mk
-          - ml
-          - mn
-          - mr
-          - ms
-          - my
-          - nb
-          - ne
-          - nl
-          - nn
-          - os
-          - pa
-          - pl
-          - pt
-          - pt-br
-          - ro
-          - ru
-          - sk
-          - sl
-          - sq
-          - sr
-          - sr-latn
-          - sv
-          - sw
-          - ta
-          - te
-          - tg
-          - th
-          - tk
-          - tr
-          - tt
-          - udm
-          - ug
-          - uk
-          - ur
-          - uz
-          - vi
-          - zh-hans
-          - zh-hant
-      tags:
-      - schema
-      security:
-      - jwtAuth: []
-      - {}
-      responses:
-        '200':
-          content:
-            application/vnd.oai.openapi:
-              schema:
-                type: object
-                additionalProperties: {}
-            application/yaml:
-              schema:
-                type: object
-                additionalProperties: {}
-            application/vnd.oai.openapi+json:
-              schema:
-                type: object
-                additionalProperties: {}
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-          description: ''
   /api/v1/auth/login/:
     post:
       operationId: v1_auth_login_create
@@ -207,8 +62,10 @@ paths:
   /api/v1/auth/register/:
     post:
       operationId: v1_auth_register_create
+      description: Create a new user account using email and password.
+      summary: Register a new user
       tags:
-      - v1
+      - Authentication
       requestBody:
         content:
           application/json:
@@ -221,9 +78,6 @@ paths:
             schema:
               $ref: '#/components/schemas/Register'
         required: true
-      security:
-      - jwtAuth: []
-      - {}
       responses:
         '201':
           content:
@@ -234,8 +88,15 @@ paths:
   /api/v1/conversations/:
     get:
       operationId: v1_conversations_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
       tags:
-      - v1
+      - Conversations
       security:
       - jwtAuth: []
       responses:
@@ -243,14 +104,12 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Conversation'
+                $ref: '#/components/schemas/PaginatedConversationList'
           description: ''
     post:
       operationId: v1_conversations_create
       tags:
-      - v1
+      - Conversations
       requestBody:
         content:
           application/json:
@@ -278,10 +137,11 @@ paths:
       - in: path
         name: id
         schema:
-          type: string
+          type: integer
+        description: A unique integer value identifying this conversation.
         required: true
       tags:
-      - v1
+      - Conversations
       security:
       - jwtAuth: []
       responses:
@@ -297,10 +157,11 @@ paths:
       - in: path
         name: id
         schema:
-          type: string
+          type: integer
+        description: A unique integer value identifying this conversation.
         required: true
       tags:
-      - v1
+      - Conversations
       requestBody:
         content:
           application/json:
@@ -327,10 +188,11 @@ paths:
       - in: path
         name: id
         schema:
-          type: string
+          type: integer
+        description: A unique integer value identifying this conversation.
         required: true
       tags:
-      - v1
+      - Conversations
       requestBody:
         content:
           application/json:
@@ -357,10 +219,11 @@ paths:
       - in: path
         name: id
         schema:
-          type: string
+          type: integer
+        description: A unique integer value identifying this conversation.
         required: true
       tags:
-      - v1
+      - Conversations
       security:
       - jwtAuth: []
       responses:
@@ -369,8 +232,37 @@ paths:
   /api/v1/messages/:
     get:
       operationId: v1_messages_list
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - in: query
+        name: role
+        schema:
+          type: string
+          enum:
+          - assistant
+          - user
+        description: |-
+          * `user` - User
+          * `assistant` - Assistant
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
       tags:
-      - v1
+      - Messages
       security:
       - jwtAuth: []
       responses:
@@ -378,14 +270,20 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Message'
+                $ref: '#/components/schemas/PaginatedMessageList'
           description: ''
     post:
       operationId: v1_messages_create
+      description: Send a message to an AI assistant and receive a response.
+      summary: Send a message
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+        description: Optional key to prevent duplicate message processing.
       tags:
-      - v1
+      - Messages
       requestBody:
         content:
           application/json:
@@ -401,12 +299,16 @@ paths:
       security:
       - jwtAuth: []
       responses:
-        '201':
+        '200':
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Message'
+                $ref: '#/components/schemas/MessageCreateResponse'
           description: ''
+        '409':
+          description: Idempotency conflict or request already in progress.
+        '502':
+          description: The LLM service failed to process the request.
   /api/v1/messages/{id}/:
     get:
       operationId: v1_messages_retrieve
@@ -414,10 +316,11 @@ paths:
       - in: path
         name: id
         schema:
-          type: string
+          type: integer
+        description: A unique integer value identifying this message.
         required: true
       tags:
-      - v1
+      - Messages
       security:
       - jwtAuth: []
       responses:
@@ -433,10 +336,11 @@ paths:
       - in: path
         name: id
         schema:
-          type: string
+          type: integer
+        description: A unique integer value identifying this message.
         required: true
       tags:
-      - v1
+      - Messages
       requestBody:
         content:
           application/json:
@@ -464,10 +368,11 @@ paths:
       - in: path
         name: id
         schema:
-          type: string
+          type: integer
+        description: A unique integer value identifying this message.
         required: true
       tags:
-      - v1
+      - Messages
       requestBody:
         content:
           application/json:
@@ -494,15 +399,44 @@ paths:
       - in: path
         name: id
         schema:
-          type: string
+          type: integer
+        description: A unique integer value identifying this message.
         required: true
       tags:
-      - v1
+      - Messages
       security:
       - jwtAuth: []
       responses:
         '204':
           description: No response body
+  /api/v1/messages/stream/:
+    post:
+      operationId: v1_messages_stream_create
+      description: Send a message and receive the AI response as a text stream.
+      summary: Stream an AI response
+      tags:
+      - Messages
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Message'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/Message'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Message'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: Streaming AI response as plain text.
 components:
   schemas:
     Conversation:
@@ -550,6 +484,59 @@ components:
       - created_at
       - id
       - role
+    MessageCreateResponse:
+      type: object
+      properties:
+        response:
+          type: string
+      required:
+      - response
+    PaginatedConversationList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+    PaginatedMessageList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=4
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
     PatchedConversation:
       type: object
       properties:
